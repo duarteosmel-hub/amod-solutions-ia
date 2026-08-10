@@ -209,7 +209,7 @@ app.get('/api/auth/google/url', (req: Request, res: Response) => {
   const redirectUri = `${appUrl}/api/auth/google/callback`;
   
   const scopes = [
-    'https://www.googleapis.com/auth/drive.file',
+    'https://www.googleapis.com/auth/drive',
     'https://www.googleapis.com/auth/userinfo.profile',
     'https://www.googleapis.com/auth/userinfo.email'
   ].join(' ');
@@ -662,7 +662,8 @@ async function refreshGoogleAccessToken(tokenData: TokenStore, res?: Response): 
   if (!tokenData.refresh_token) return null;
   try {
     const clientId = process.env.GOOGLE_CLIENT_ID || process.env.OAUTH_CLIENT_ID || '';
-   const clientSecret = process.env.GOOGLE_CLIENT_SECRET || process.env.OAUTH_CLIENT_SECRET || '';
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET || process.env.OAUTH_CLIENT_SECRET || '';
+
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
