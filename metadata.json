@@ -1,0 +1,6 @@
+{
+  "name": "Amod Solutions IA",
+  "description": "Asistente de Secretariado Administrativo para organizar y clasificar documentos empresariales en Google Drive.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
