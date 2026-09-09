@@ -27,7 +27,26 @@ export const SalesRegister: React.FC<SalesRegisterProps> = ({
   const [formaPago, setFormaPago] = useState<SaleRecord['formaPago']>('Efectivo');
   const [estadoPago, setEstadoPago] = useState<SaleRecord['estadoPago']>('Pagado');
   const [observaciones, setObservaciones] = useState<string>('');
+const PRODUCTS_CATALOG = [
+  { name: 'Cursos de Computación', price: 180000 },
+  { name: 'Clases de IA', price: 300000 },
+  { name: 'Curso de Programación', price: 200000 },
+];
 
+const handleSelectProduct = (productName: string) => {
+  setProductoServicio(productName);
+
+  const product = PRODUCTS_CATALOG.find(
+    (item) => item.name === productName
+  );
+
+  if (product) {
+    setPrecioUnitario(product.price);
+  } else {
+    setPrecioUnitario('');
+  }
+};
+  
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isConfirmationOpen, setIsConfirmationOpen] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
@@ -342,14 +361,20 @@ export const SalesRegister: React.FC<SalesRegisterProps> = ({
                 <Package className="w-3.5 h-3.5 text-blue-600" />
                 <span>Producto o Servicio *</span>
               </label>
-              <input
-                type="text"
-                required
-                placeholder="Ej. Cuaderno Universitario / Asesoría"
-                value={productoServicio}
-                onChange={(e) => setProductoServicio(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-medium text-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              />
+             <select
+  required
+  value={productoServicio}
+  onChange={(e) => handleSelectProduct(e.target.value)}
+  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-medium text-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+>
+  <option value="">Seleccione un producto o servicio</option>
+
+  {PRODUCTS_CATALOG.map((product) => (
+    <option key={product.name} value={product.name}>
+      {product.name} — ${product.price.toLocaleString('es-CO')}
+    </option>
+  ))}
+</select>
             </div>
 
             {/* Cantidad */}
