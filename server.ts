@@ -1541,20 +1541,57 @@ app.post(['/api/sales/save', '/api/sales/save-sheet'], async (req: Request, res:
         webViewLink = fileSearchData.files[0].webViewLink || `https://drive.google.com/file/d/${driveFileId}/view`;
 
         // Download existing Excel file to append
-        try {
-          const downloadRes = await fetchDriveApi(`https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`, { method: 'GET' }, req, res);
-          if (downloadRes.ok) {
-            const fileBuf = await downloadRes.arrayBuffer();
-            const workbook = XLSX.read(Buffer.from(fileBuf), { type: 'buffer' });
-            const sheetName = workbook.SheetNames[0] || 'Ventas';
-            const worksheet = workbook.Sheets[sheetName];
-            existingRows = XLSX.utils.sheet_to_json(worksheet) || [];
-          }
-        } catch (downloadErr) {
-          console.warn('Error al leer Excel existente de Drive:', downloadErr);
-        }
-      }
-    }
+       // Download existing Excel file to append
+try {
+  const downloadRes = await fetchDriveApi(
+    `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`,
+    { method: 'GET' },
+    req,
+    res
+  );
+
+  if (!downloadRes.ok) {
+    const errTxt = await downloadRes.text();
+    throw new Error(
+      `No se pudo leer el Excel existente de Google Drive. ` +
+      `La venta NO fue modificada para proteger los registros anteriores. ` +
+      `Respuesta de Google Drive: ${errTxt}`
+    );
+  }
+
+  const fileBuf = await downloadRes.arrayBuffer();
+
+  if (!fileBuf || fileBuf.byteLength === 0) {
+    throw new Error(
+      'Google Drive devolvió un archivo Excel vacío. ' +
+      'La venta NO fue guardada para proteger los registros anteriores.'
+    );
+  }
+
+  const workbook = XLSX.read(Buffer.from(fileBuf), { type: 'buffer' });
+  const sheetName = workbook.SheetNames[0] || 'Ventas';
+  const worksheet = workbook.Sheets[sheetName];
+
+  if (!worksheet) {
+    throw new Error(
+      'No se encontró la hoja de ventas dentro del Excel existente. ' +
+      'La venta NO fue guardada para proteger los registros anteriores.'
+    );
+  }
+
+  existingRows = XLSX.utils.sheet_to_json(worksheet) || [];
+
+} catch (downloadErr) {
+  console.error('Error al leer Excel existente de Drive:', downloadErr);
+
+  throw new Error(
+    'No se pudo leer el Excel existente de Google Drive. ' +
+    'La venta NO fue guardada para proteger los registros anteriores.'
+  );
+}
+
+// Append new row without overwriting previous sales
+existingRows.push(newRowObject);
 
     // Append new row without overwriting previous sales
     existingRows.push(newRowObject);
