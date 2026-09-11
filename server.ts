@@ -1579,33 +1579,31 @@ try {
     );
   }
 
-  existingRows = XLSX.utils.sheet_to_json(worksheet) || [];
+  // Agregar la nueva venta directamente a la hoja existente de Google Drive.
+// Esto conserva la estructura y las fórmulas que ya existen en el archivo.
+XLSX.utils.sheet_add_json(worksheet, [newRowObject], {
+  header: [
+    'ID Venta',
+    'Fecha',
+    'Cliente',
+    'Producto/Servicio',
+    'Cantidad',
+    'Precio Unitario',
+    'Total',
+    'Forma de Pago',
+    'Estado',
+    'Observaciones'
+  ],
+  skipHeader: true,
+  origin: -1
+});
 
-} catch (downloadErr) {
-  console.error('Error al leer Excel existente de Drive:', downloadErr);
-
-  throw new Error(
-    'No se pudo leer el Excel existente de Google Drive. ' +
-    'La venta NO fue guardada para proteger los registros anteriores.'
-  );
-}
-
-// Append new row without overwriting previous sales
-existingRows.push(newRowObject);
-
-    // Append new row without overwriting previous sales
-    existingRows.push(newRowObject);
-
-    // Create updated workbook
-    const worksheet = XLSX.utils.json_to_sheet(existingRows, {
-      header: [
-        'ID Venta', 'Fecha', 'Cliente', 'Producto/Servicio',
-        'Cantidad', 'Precio Unitario', 'Total', 'Forma de Pago', 'Estado', 'Observaciones'
-      ]
-    });
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Ventas');
-    const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+// Mantener el mismo workbook descargado de Google Drive.
+// NO crear un workbook nuevo.
+const excelBuffer = XLSX.write(workbook, {
+  type: 'buffer',
+  bookType: 'xlsx'
+});
 
     if (driveFileId) {
       // Update existing file on Google Drive via PATCH
