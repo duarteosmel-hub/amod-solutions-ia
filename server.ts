@@ -1608,7 +1608,7 @@ app.post(['/api/sales/save', '/api/sales/save-sheet'], async (req: Request, res:
           origin: -1
         });
 
-        // Mantener el workbook existente.
+             // Mantener el workbook existente.
         excelBuffer = XLSX.write(workbook, {
           type: 'buffer',
           bookType: 'xlsx'
@@ -1630,7 +1630,30 @@ app.post(['/api/sales/save', '/api/sales/save-sheet'], async (req: Request, res:
           'Ventas'
         );
 
-              excelBuffer = XLSX.write(workbook, {
+        excelBuffer = XLSX.write(workbook, {
+          type: 'buffer',
+          bookType: 'xlsx'
+        });
+      }
+
+    } else {
+      // =========================================================
+      // NO SE PUDO HACER LA BÚSQUEDA EN GOOGLE DRIVE
+      // CREAR UN EXCEL NUEVO
+      // =========================================================
+      const workbook = XLSX.utils.book_new();
+
+      const worksheet = XLSX.utils.json_to_sheet([
+        newRowObject
+      ]);
+
+      XLSX.utils.book_append_sheet(
+        workbook,
+        worksheet,
+        'Ventas'
+      );
+
+      excelBuffer = XLSX.write(workbook, {
         type: 'buffer',
         bookType: 'xlsx'
       });
