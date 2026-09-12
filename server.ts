@@ -1515,8 +1515,12 @@ app.post(['/api/sales/save', '/api/sales/save-sheet'], async (req: Request, res:
 
     // 2. Search if Ventas_YYYY-MM.xlsx exists in yearFolderId
     const searchFileQuery = `mimeType != 'application/vnd.google-apps.folder' and name = '${xlsxFileName}' and '${yearFolderId}' in parents and trashed = false`;
-    const fileSearchRes = await fetchDriveApi(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(searchFileQuery)}&fields=files(id,name,webViewLink)`, { method: 'GET' }, req, res);
-
+    const fileSearchRes = await fetchDriveApi(
+  `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(searchFileQuery)}&fields=files(id,name,mimeType,webViewLink,size,modifiedTime)`,
+  { method: 'GET' },
+  req,
+  res
+);
     let driveFileId = '';
     let webViewLink = '';
     let existingRows: any[] = [];
@@ -1538,6 +1542,11 @@ app.post(['/api/sales/save', '/api/sales/save-sheet'], async (req: Request, res:
 
     if (fileSearchRes.ok) {
       const fileSearchData = await fileSearchRes.json();
+     
+      console.log(
+  'ARCHIVO EXCEL ENCONTRADO EN DRIVE:',
+  JSON.stringify(fileSearchData.files?.[0] || null, null, 2)
+);
 
       if (fileSearchData.files && fileSearchData.files.length > 0) {
         // =========================================================
