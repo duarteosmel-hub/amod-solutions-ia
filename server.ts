@@ -1534,119 +1534,190 @@ app.post(['/api/sales/save', '/api/sales/save-sheet'], async (req: Request, res:
       'Observaciones': observaciones || ''
     };
 
+       let excelBuffer: Buffer;
+
     if (fileSearchRes.ok) {
       const fileSearchData = await fileSearchRes.json();
+
       if (fileSearchData.files && fileSearchData.files.length > 0) {
+        // =========================================================
+        // EXISTE EL EXCEL: DESCARGAR Y AGREGAR LA NUEVA VENTA
+        // =========================================================
         driveFileId = fileSearchData.files[0].id;
-        webViewLink = fileSearchData.files[0].webViewLink || `https://drive.google.com/file/d/${driveFileId}/view`;
+        webViewLink =
+          fileSearchData.files[0].webViewLink ||
+          `https://drive.google.com/file/d/${driveFileId}/view`;
 
-        // Download existing Excel file to append
-  const downloadRes = await fetchDriveApi(
-    `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`,
-    { method: 'GET' },
-    req,
-    res
-  );
+        // Descargar el Excel existente desde Google Drive
+        const downloadRes = await fetchDriveApi(
+          `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`,
+          { method: 'GET' },
+          req,
+          res
+        );
 
-  if (!downloadRes.ok) {
-    const errTxt = await downloadRes.text();
-    throw new Error(
-      `No se pudo leer el Excel existente de Google Drive. ` +
-      `La venta NO fue modificada para proteger los registros anteriores. ` +
-      `Respuesta de Google Drive: ${errTxt}`
-    );
-  }
+        if (!downloadRes.ok) {
+          const errTxt = await downloadRes.text();
 
-  const fileBuf = await downloadRes.arrayBuffer();
+          throw new Error(
+            `No se pudo leer el Excel existente de Google Drive. ` +
+            `La venta NO fue modificada para proteger los registros anteriores. ` +
+            `Respuesta de Google Drive: ${errTxt}`
+          );
+        }
 
-  if (!fileBuf || fileBuf.byteLength === 0) {
-    throw new Error(
-      'Google Drive devolvió un archivo Excel vacío. ' +
-      'La venta NO fue guardada para proteger los registros anteriores.'
-    );
-  }
+        const fileBuf = await downloadRes.arrayBuffer();
 
-  const workbook = XLSX.read(Buffer.from(fileBuf), { type: 'buffer' });
-  const sheetName = workbook.SheetNames[0] || 'Ventas';
-  const worksheet = workbook.Sheets[sheetName];
+        if (!fileBuf || fileBuf.byteLength === 0) {
+          throw new Error(
+            'Google Drive devolvió un archivo Excel vacío. ' +
+            'La venta NO fue guardada para proteger los registros anteriores.'
+          );
+        }
 
-  if (!worksheet) {
-    throw new Error(
-      'No se encontró la hoja de ventas dentro del Excel existente. ' +
-      'La venta NO fue guardada para proteger los registros anteriores.'
-    );
-  }
+        const workbook = XLSX.read(Buffer.from(fileBuf), {
+          type: 'buffer'
+        });
 
-  // Agregar la nueva venta directamente a la hoja existente de Google Drive.
-// Esto conserva la estructura y las fórmulas que ya existen en el archivo.
-XLSX.utils.sheet_add_json(worksheet, [newRowObject], {
-  header: [
-    'ID Venta',
-    'Fecha',
-    'Cliente',
-    'Producto/Servicio',
-    'Cantidad',
-    'Precio Unitario',
-    'Total',
-    'Forma de Pago',
-    'Estado',
-    'Observaciones'
-  ],
-  skipHeader: true,
-  origin: -1
-});
+        const sheetName = workbook.SheetNames[0] || 'Ventas';
+        const worksheet = workbook.Sheets[sheetName];
 
-// Mantener el mismo workbook descargado de Google Drive.
-// NO crear un workbook nuevo.
-const excelBuffer = XLSX.write(workbook, {
-  type: 'buffer',
-  bookType: 'xlsx'
-});
+        if (!worksheet) {
+          throw new Error(
+            'No se encontró la hoja de ventas dentro del Excel existente. ' +
+            'La venta NO fue guardada para proteger los registros anteriores.'
+          );
+        }
+
+        // Agregar la nueva venta a la hoja existente.
+        // NO crear un workbook nuevo.
+        XLSX.utils.sheet_add_json(worksheet, [newRowObject], {
+          header: [
+            'ID Venta',
+            'Fecha',
+            'Cliente',
+            'Producto/Servicio',
+            'Cantidad',
+            'Precio Unitario',
+            'Total',
+            'Forma de Pago',
+            'Estado',
+            'Observaciones'
+          ],
+          skipHeader: true,
+          origin: -1
+        });
+
+        // Mantener el workbook existente.
+        excelBuffer = XLSX.write(workbook, {
+          type: 'buffer',
+          bookType: 'xlsx'
+        });
+
+      } else {
+        // =========================================================
+        // NO EXISTE EL EXCEL: CREAR UNO NUEVO
+        // =========================================================
+        const workbook = XLSX.utils.book_new();
+
+        const worksheet = XLSX.utils.json_to_sheet([
+          newRowObject
+        ]);
+
+        XLSX.utils.book_append_sheet(
+          workbook,
+          worksheet,
+          'Ventas'
+        );
+
+              excelBuffer = XLSX.write(workbook, {
+        type: 'buffer',
+        bookType: 'xlsx'
+      });
+    }
+
+    // =========================================================
+    // ACTUALIZAR EXISTENTE O CREAR NUEVO EN GOOGLE DRIVE
+    // =========================================================
 
     if (driveFileId) {
       // Update existing file on Google Drive via PATCH
-      const updateRes = await fetchDriveApi(`https://www.googleapis.com/upload/drive/v3/files/${driveFileId}?uploadType=media&fields=id,name,webViewLink`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      const updateRes = await fetchDriveApi(
+        `https://www.googleapis.com/upload/drive/v3/files/${driveFileId}?uploadType=media&fields=id,name,webViewLink`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type':
+              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          },
+          body: excelBuffer
         },
-        body: excelBuffer
-      }, req, res);
+        req,
+        res
+      );
 
       if (!updateRes.ok) {
         const errTxt = await updateRes.text();
-        throw new Error(`Error al actualizar el archivo Excel de ventas en Google Drive: ${errTxt}`);
+
+        throw new Error(
+          `Error al actualizar el archivo Excel de ventas en Google Drive: ${errTxt}`
+        );
       }
 
       const updatedData = await updateRes.json();
+
       driveFileId = updatedData.id;
-      webViewLink = updatedData.webViewLink || webViewLink;
+      webViewLink =
+        updatedData.webViewLink || webViewLink;
+
     } else {
       // Create new file on Google Drive via Multipart POST
       const metadata = {
         name: xlsxFileName,
         parents: [yearFolderId],
-        description: `Registro Oficial de Ventas para ${yearMonthStr}. Organizado por Amod Solutions IA.`
+        description:
+          `Registro Oficial de Ventas para ${yearMonthStr}. ` +
+          `Organizado por Amod Solutions IA.`
       };
 
-      const { body: multipartRequestBody, boundary } = createMultipartBuffer(metadata, excelBuffer, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      const {
+        body: multipartRequestBody,
+        boundary
+      } = createMultipartBuffer(
+        metadata,
+        excelBuffer,
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      );
 
-      const uploadRes = await fetchDriveApi('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink', {
-        method: 'POST',
-        headers: {
-          'Content-Type': `multipart/related; boundary="${boundary}"`
+      const uploadRes = await fetchDriveApi(
+        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type':
+              `multipart/related; boundary="${boundary}"`
+          },
+          body: multipartRequestBody
         },
-        body: multipartRequestBody
-      }, req, res);
+        req,
+        res
+      );
 
       if (!uploadRes.ok) {
         const errText = await uploadRes.text();
-        throw new Error(`Google Drive rechazó la creación del Excel de ventas (${uploadRes.status}): ${errText}`);
+
+        throw new Error(
+          `Google Drive rechazó la creación del Excel de ventas (${uploadRes.status}): ${errText}`
+        );
       }
 
       const uploadedData = await uploadRes.json();
+
       driveFileId = uploadedData.id;
-      webViewLink = uploadedData.webViewLink || `https://drive.google.com/file/d/${driveFileId}/view`;
+
+      webViewLink =
+        uploadedData.webViewLink ||
+        `https://drive.google.com/file/d/${driveFileId}/view`;
     }
 
     const driveResult = {
