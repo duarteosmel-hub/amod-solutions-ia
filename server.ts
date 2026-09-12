@@ -1541,8 +1541,6 @@ app.post(['/api/sales/save', '/api/sales/save-sheet'], async (req: Request, res:
         webViewLink = fileSearchData.files[0].webViewLink || `https://drive.google.com/file/d/${driveFileId}/view`;
 
         // Download existing Excel file to append
-       // Download existing Excel file to append
-try {
   const downloadRes = await fetchDriveApi(
     `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`,
     { method: 'GET' },
