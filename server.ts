@@ -1622,8 +1622,38 @@ app.post(['/api/sales/save', '/api/sales/save-sheet'], async (req: Request, res:
           type: 'buffer',
           bookType: 'xlsx'
         });
+        
+        try {
+  const verifyWorkbook = XLSX.read(excelBuffer, {
+    type: 'buffer'
+  });
 
-      } else {
+  const verifySheetName = verifyWorkbook.SheetNames[0];
+  const verifyWorksheet = verifyWorkbook.Sheets[verifySheetName];
+
+  const verifyRows = XLSX.utils.sheet_to_json(verifyWorksheet);
+
+  const saleExistsInBuffer = verifyRows.some(
+    (row: any) => row['ID Venta'] === saleId
+  );
+
+  console.log(
+    'VERIFICACIÓN XLSX ANTES DE SUBIR:',
+    {
+      saleId,
+      saleExistsInBuffer,
+      totalRows: verifyRows.length,
+      excelBytes: excelBuffer.length
+    }
+  );
+} catch (verifyErr) {
+  console.error(
+    'ERROR VERIFICANDO XLSX ANTES DE SUBIR:',
+    verifyErr
+  );
+}
+
+} else {
         // =========================================================
         // NO EXISTE EL EXCEL: CREAR UNO NUEVO
         // =========================================================
