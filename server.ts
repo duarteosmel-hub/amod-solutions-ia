@@ -1727,8 +1727,18 @@ app.post(['/api/sales/save', '/api/sales/save-sheet'], async (req: Request, res:
       }
 
       const updatedData = await updateRes.json();
+      
+      console.log('EXCEL ACTUALIZADO EN GOOGLE DRIVE:', {
+  status: updateRes.status,
+  ok: updateRes.ok,
+  driveFileId: updatedData.id,
+  name: updatedData.name,
+  webViewLink: updatedData.webViewLink || webViewLink,
+  excelBytes: excelBuffer.length
+});
 
       driveFileId = updatedData.id;
+      
       webViewLink =
         updatedData.webViewLink || webViewLink;
 
