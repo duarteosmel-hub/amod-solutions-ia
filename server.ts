@@ -1741,6 +1741,77 @@ app.post(['/api/sales/save', '/api/sales/save-sheet'], async (req: Request, res:
       
       webViewLink =
         updatedData.webViewLink || webViewLink;
+            // =========================================================
+      // VERIFICAR QUE GOOGLE DRIVE REALMENTE CONSERVÓ LA VENTA
+      // =========================================================
+      const verifyDriveRes = await fetchDriveApi(
+        `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`,
+        {
+          method: 'GET'
+        },
+        req,
+        res
+      );
+
+      if (!verifyDriveRes.ok) {
+        const verifyErrTxt = await verifyDriveRes.text();
+
+        throw new Error(
+          `Google Drive actualizó el Excel, pero no fue posible verificar ` +
+          `el archivo después de guardarlo. Respuesta: ${verifyErrTxt}`
+        );
+      }
+
+      const verifyDriveBuffer = Buffer.from(
+        await verifyDriveRes.arrayBuffer()
+      );
+
+      const verifyDriveWorkbook = XLSX.read(
+        verifyDriveBuffer,
+        {
+          type: 'buffer'
+        }
+      );
+
+      const verifyDriveSheetName =
+        verifyDriveWorkbook.SheetNames[0];
+
+      const verifyDriveWorksheet =
+        verifyDriveWorkbook.Sheets[verifyDriveSheetName];
+
+      const verifyDriveRows =
+        XLSX.utils.sheet_to_json(verifyDriveWorksheet);
+
+      const saleExistsInDrive =
+        verifyDriveRows.some(
+          (row: any) =>
+            String(row['ID Venta'] || '').trim() ===
+            String(saleId).trim()
+        );
+
+      console.log(
+        'VERIFICACIÓN FINAL DEL EXCEL EN GOOGLE DRIVE:',
+        {
+          saleId,
+          saleExistsInDrive,
+          totalRowsInDrive: verifyDriveRows.length,
+          driveFileId,
+          verifyDriveBytes: verifyDriveBuffer.length
+        }
+      );
+
+      if (!saleExistsInDrive) {
+        throw new Error(
+          `Google Drive respondió correctamente, pero la venta ` +
+          `${saleId} NO aparece en el Excel después de la actualización. ` +
+          `La venta NO se marcará como guardada correctamente.`
+        );
+      }
+
+      console.log(
+        '✅ VENTA CONFIRMADA DENTRO DEL EXCEL DE GOOGLE DRIVE:',
+        saleId
+      );
 
     } else {
       // Create new file on Google Drive via Multipart POST
