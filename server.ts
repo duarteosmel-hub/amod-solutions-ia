@@ -2723,7 +2723,9 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    `[AMOD Solución IA] Servidor ejecutándose en http://0.0.0.0:${PORT}`);
+    console.log(
+      `[AMOD Solución IA] Servidor ejecutándose en http://0.0.0.0:${PORT}`
+    );
   });
 }
 
