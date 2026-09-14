@@ -1833,24 +1833,12 @@ async function appendSaleToNativeGoogleSheet(
     }
   }
 
-  // ---------------------------------------------------------
+    // ---------------------------------------------------------
   // 4. DETERMINAR LA FILA EXACTA DONDE SE ESCRIBIRÁ
   // ---------------------------------------------------------
-  //
-  // Si solo existen encabezados:
-  //   nueva venta = fila 2
-  //
-  // Si existen ventas hasta la fila 3:
-  //   nueva venta = fila 4
-  //
-  // IMPORTANTE:
-  // No usamos la fila 1011 automáticamente.
 
   const targetRow =
     Math.max(2, lastSaleRowIndex + 1);
-
-  const targetRange =
-    `'${escapedSheetTitle}'!A${targetRow}:J${targetRow}`;
 
   console.log(
     '📍 FILA REAL DETECTADA PARA LA NUEVA VENTA:',
@@ -1858,20 +1846,70 @@ async function appendSaleToNativeGoogleSheet(
       spreadsheetId,
       sheetTitle,
       lastSaleRowIndex,
-      targetRow,
-      targetRange
+      targetRow
     }
   );
 
   // ---------------------------------------------------------
-  // 5. ESCRIBIR LA NUEVA VENTA EN LA FILA CORRECTA
+  // 5. ASEGURAR QUE LA FILA EXISTA EN GOOGLE SHEETS
   // ---------------------------------------------------------
   //
-  // Usamos values.update en lugar de values.append.
+  // Google Sheets puede tener, por ejemplo, 1011 filas creadas.
+  // Si necesitamos escribir en la 1012, primero ampliamos la
+  // cuadrícula de la pestaña.
   //
-  // Esto escribe SOLO A:J de la fila indicada.
-  // No elimina ni modifica otras filas.
-  // No limpia fórmulas fuera de A:J.
+  // Esto NO borra datos ni fórmulas existentes.
+
+  const targetRowIndex = targetRow - 1;
+
+  const gridRequest = {
+    requests: [
+      {
+        appendDimension: {
+          sheetId: firstSheet.sheetId,
+          dimension: 'ROWS',
+          length: 1
+        }
+      }
+    ]
+  };
+
+  const gridRes = await fetchDriveApi(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(gridRequest)
+    },
+    req,
+    res
+  );
+
+  if (!gridRes.ok) {
+    const errorText = await gridRes.text();
+
+    throw new Error(
+      `No se pudo ampliar la hoja para agregar la nueva venta: ${errorText}`
+    );
+  }
+
+  console.log(
+    '✅ FILA NUEVA DISPONIBLE EN GOOGLE SHEETS:',
+    {
+      sheetTitle,
+      targetRow,
+      targetRowIndex
+    }
+  );
+
+  // ---------------------------------------------------------
+  // 6. ESCRIBIR LA NUEVA VENTA EN LA FILA CORRECTA
+  // ---------------------------------------------------------
+
+  const targetRange =
+    `'${escapedSheetTitle}'!A${targetRow}:J${targetRow}`;
 
   const updateRes = await fetchDriveApi(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}` +
@@ -1934,8 +1972,8 @@ async function appendSaleToNativeGoogleSheet(
         result?.updates?.updatedRange ||
         targetRange
     }
-  };
-}
+ };
+ }
 
 // API to save a sale and write/append to Google Drive (.xlsx)
 app.post(['/api/sales/save', '/api/sales/save-sheet'], async (req: Request, res: Response) => {
