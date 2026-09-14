@@ -1593,7 +1593,7 @@ async function createGoogleSheetFromXlsx(
     );
   }
 
-    '  console.log(
+  console.log(
     '✅ GOOGLE SHEET NATIVA CREADA:',
     {
       spreadsheetId,
