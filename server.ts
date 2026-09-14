@@ -1593,7 +1593,7 @@ async function createGoogleSheetFromXlsx(
     );
   }
 
-  
+    '  console.log(
     '✅ GOOGLE SHEET NATIVA CREADA:',
     {
       spreadsheetId,
@@ -1603,7 +1603,6 @@ async function createGoogleSheetFromXlsx(
 
   return spreadsheetId;
 }
-
 
 async function appendSaleToGoogleSheet(
   spreadsheetId: string,
@@ -1637,7 +1636,7 @@ async function appendSaleToGoogleSheet(
 
   const result = await appendRes.json();
 
-  
+    console.log(
     '✅ VENTA AGREGADA DIRECTAMENTE A GOOGLE SHEETS:',
     {
       spreadsheetId,
