@@ -1728,7 +1728,6 @@ async function findNativeSalesSheet(
 // =========================================================
 // AGREGAR VENTA DIRECTAMENTE A GOOGLE SHEETS
 // =========================================================
-
 async function appendSaleToNativeGoogleSheet(
   spreadsheetId: string,
   saleRow: any[],
@@ -1741,7 +1740,7 @@ async function appendSaleToNativeGoogleSheet(
   // ---------------------------------------------------------
 
   const spreadsheetRes = await fetchDriveApi(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title)`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title,gridProperties(rowCount,columnCount))`,
     {
       method: 'GET'
     },
@@ -1773,11 +1772,12 @@ async function appendSaleToNativeGoogleSheet(
   const escapedSheetTitle =
     sheetTitle.replace(/'/g, "''");
 
+  const currentRowCount =
+    Number(firstSheet.gridProperties?.rowCount || 0);
+
   // ---------------------------------------------------------
-  // 2. LEER LAS FILAS EXISTENTES DE A:J
+  // 2. LEER TODAS LAS FILAS EXISTENTES
   // ---------------------------------------------------------
-  // No modificamos nada aquí.
-  // Solo consultamos para saber dónde está la última venta real.
 
   const readRange =
     `'${escapedSheetTitle}'!A:J`;
@@ -1809,103 +1809,303 @@ async function appendSaleToNativeGoogleSheet(
       : [];
 
   // ---------------------------------------------------------
-  // 3. BUSCAR LA ÚLTIMA FILA REAL DE VENTAS
+  // 3. RECUPERAR ÚNICAMENTE LAS VENTAS REALES
   // ---------------------------------------------------------
-  // La fila 1 contiene los encabezados.
-  // Buscamos únicamente filas que tengan un ID de venta
-  // real en la columna A.
   //
-  // Así evitamos que Google Sheets nos mande hasta la fila 1011
-  // solamente porque existen filas/formato/fórmulas más abajo.
+  // La fila 1 contiene encabezados.
+  //
+  // Ignoramos filas completamente vacías.
+  // Una fila se considera venta real si la columna A
+  // contiene un ID de venta.
+  //
+  // Ejemplo:
+  //
+  // fila 2  -> venta
+  // fila 3  -> venta
+  // fila 4  -> venta
+  // fila 8  -> venta
+  // fila 1012 -> venta
+  //
+  // El resultado será:
+  //
+  // venta 1 -> fila 2
+  // venta 2 -> fila 3
+  // venta 3 -> fila 4
+  // venta 4 -> fila 5
+  //
+  // ---------------------------------------------------------
 
-  let lastSaleRowIndex = 0;
+  const existingSales: any[][] = [];
 
   for (let i = 1; i < existingRows.length; i++) {
+
     const row = existingRows[i];
 
     const saleIdValue =
-      row?.[0] !== undefined && row?.[0] !== null
+      row?.[0] !== undefined &&
+      row?.[0] !== null
         ? String(row[0]).trim()
         : '';
 
     if (saleIdValue !== '') {
-      lastSaleRowIndex = i + 1;
+      existingSales.push(row);
     }
   }
 
-    // ---------------------------------------------------------
-  // 4. DETERMINAR LA FILA EXACTA DONDE SE ESCRIBIRÁ
-  // ---------------------------------------------------------
-
-  const targetRow =
-    Math.max(2, lastSaleRowIndex + 1);
-
   console.log(
-    '📍 FILA REAL DETECTADA PARA LA NUEVA VENTA:',
+    '📊 VENTAS REALES ENCONTRADAS:',
     {
       spreadsheetId,
       sheetTitle,
-      lastSaleRowIndex,
+      ventasEncontradas: existingSales.length,
+      filasLeidas: existingRows.length,
+      filaCuadriculaActual: currentRowCount
+    }
+  );
+
+  // ---------------------------------------------------------
+  // 4. DETERMINAR SI LA HOJA ESTÁ DESORDENADA
+  // ---------------------------------------------------------
+
+  const expectedLastSaleRow =
+    existingSales.length + 1;
+
+  let sheetNeedsCompacting = false;
+
+  for (let i = 0; i < existingSales.length; i++) {
+
+    const expectedRowIndex = i + 1;
+
+    const originalRow =
+      existingRows[expectedRowIndex];
+
+    const originalSaleId =
+      originalRow?.[0] !== undefined &&
+      originalRow?.[0] !== null
+        ? String(originalRow[0]).trim()
+        : '';
+
+    const expectedSaleId =
+      existingSales[i]?.[0] !== undefined &&
+      existingSales[i]?.[0] !== null
+        ? String(existingSales[i][0]).trim()
+        : '';
+
+    if (originalSaleId !== expectedSaleId) {
+      sheetNeedsCompacting = true;
+      break;
+    }
+  }
+
+  // También compactamos si hay más filas ocupadas
+  // después del último lugar que debería tener ventas.
+
+  if (existingRows.length > expectedLastSaleRow + 1) {
+
+    for (
+      let i = expectedLastSaleRow + 1;
+      i < existingRows.length;
+      i++
+    ) {
+
+      const row = existingRows[i];
+
+      const saleIdValue =
+        row?.[0] !== undefined &&
+        row?.[0] !== null
+          ? String(row[0]).trim()
+          : '';
+
+      if (saleIdValue !== '') {
+        sheetNeedsCompacting = true;
+        break;
+      }
+    }
+  }
+
+  // ---------------------------------------------------------
+  // 5. COMPACTAR LAS VENTAS EXISTENTES
+  // ---------------------------------------------------------
+
+  if (sheetNeedsCompacting) {
+
+    console.log(
+      '🧹 LA HOJA TIENE FILAS VACÍAS ENTRE VENTAS.',
+      'SE PROCEDERÁ A COMPACTAR LAS VENTAS.'
+    );
+
+    if (existingSales.length > 0) {
+
+      const compactEndRow =
+        existingSales.length + 1;
+
+      const compactRange =
+        `'${escapedSheetTitle}'!A2:J${compactEndRow}`;
+
+      const compactRes = await fetchDriveApi(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}` +
+          `/values/${encodeURIComponent(compactRange)}` +
+          `?valueInputOption=USER_ENTERED`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            range: compactRange,
+            majorDimension: 'ROWS',
+            values: existingSales
+          })
+        },
+        req,
+        res
+      );
+
+      if (!compactRes.ok) {
+        const errorText = await compactRes.text();
+
+        throw new Error(
+          `No se pudieron compactar las ventas existentes: ${errorText}`
+        );
+      }
+
+      console.log(
+        '✅ VENTAS EXISTENTES COMPACTADAS:',
+        {
+          cantidad: existingSales.length,
+          desdeFila: 2,
+          hastaFila: compactEndRow
+        }
+      );
+    }
+
+    // -------------------------------------------------------
+    // 6. LIMPIAR LAS FILAS SOBRANTES
+    // -------------------------------------------------------
+    //
+    // Solamente limpiamos A:J de las filas que anteriormente
+    // estaban ocupadas por registros de ventas.
+    //
+    // NO tocamos columnas posteriores.
+    // NO tocamos la fila de encabezados.
+    //
+
+    const oldLastRow =
+      existingRows.length;
+
+    const newLastRow =
+      existingSales.length + 1;
+
+    if (oldLastRow > newLastRow) {
+
+      const clearStartRow =
+        newLastRow + 1;
+
+      const clearRange =
+        `'${escapedSheetTitle}'!A${clearStartRow}:J${oldLastRow}`;
+
+      const clearRes = await fetchDriveApi(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}` +
+          `/values/${encodeURIComponent(clearRange)}:clear`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({})
+        },
+        req,
+        res
+      );
+
+      if (!clearRes.ok) {
+        const errorText = await clearRes.text();
+
+        throw new Error(
+          `No se pudieron limpiar las filas vacías antiguas: ${errorText}`
+        );
+      }
+
+      console.log(
+        '🧹 FILAS VACÍAS ANTIGUAS LIMPIADAS:',
+        {
+          desdeFila: clearStartRow,
+          hastaFila: oldLastRow
+        }
+      );
+    }
+  }
+
+  // ---------------------------------------------------------
+  // 7. DETERMINAR LA FILA DE LA NUEVA VENTA
+  // ---------------------------------------------------------
+
+  const targetRow =
+    Math.max(2, existingSales.length + 2);
+
+  console.log(
+    '📍 FILA REAL PARA LA NUEVA VENTA:',
+    {
+      spreadsheetId,
+      sheetTitle,
+      ventasExistentes: existingSales.length,
       targetRow
     }
   );
 
   // ---------------------------------------------------------
-  // 5. ASEGURAR QUE LA FILA EXISTA EN GOOGLE SHEETS
+  // 8. ASEGURAR QUE LA FILA EXISTA
   // ---------------------------------------------------------
-  //
-  // Google Sheets puede tener, por ejemplo, 1011 filas creadas.
-  // Si necesitamos escribir en la 1012, primero ampliamos la
-  // cuadrícula de la pestaña.
-  //
-  // Esto NO borra datos ni fórmulas existentes.
 
-  const targetRowIndex = targetRow - 1;
+  if (targetRow > currentRowCount) {
 
-  const gridRequest = {
-    requests: [
-      {
-        appendDimension: {
-          sheetId: firstSheet.sheetId,
-          dimension: 'ROWS',
-          length: 1
+    const rowsToAdd =
+      targetRow - currentRowCount;
+
+    const gridRequest = {
+      requests: [
+        {
+          appendDimension: {
+            sheetId: firstSheet.sheetId,
+            dimension: 'ROWS',
+            length: rowsToAdd
+          }
         }
-      }
-    ]
-  };
+      ]
+    };
 
-  const gridRes = await fetchDriveApi(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
+    const gridRes = await fetchDriveApi(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(gridRequest)
       },
-      body: JSON.stringify(gridRequest)
-    },
-    req,
-    res
-  );
+      req,
+      res
+    );
 
-  if (!gridRes.ok) {
-    const errorText = await gridRes.text();
+    if (!gridRes.ok) {
+      const errorText = await gridRes.text();
 
-    throw new Error(
-      `No se pudo ampliar la hoja para agregar la nueva venta: ${errorText}`
+      throw new Error(
+        `No se pudo ampliar la hoja para agregar la nueva venta: ${errorText}`
+      );
+    }
+
+    console.log(
+      '✅ CUADRÍCULA DE GOOGLE SHEETS AMPLIADA:',
+      {
+        filasAgregadas: rowsToAdd,
+        targetRow
+      }
     );
   }
 
-  console.log(
-    '✅ FILA NUEVA DISPONIBLE EN GOOGLE SHEETS:',
-    {
-      sheetTitle,
-      targetRow,
-      targetRowIndex
-    }
-  );
-
   // ---------------------------------------------------------
-  // 6. ESCRIBIR LA NUEVA VENTA EN LA FILA CORRECTA
+  // 9. ESCRIBIR LA NUEVA VENTA
   // ---------------------------------------------------------
 
   const targetRange =
@@ -1942,7 +2142,7 @@ async function appendSaleToNativeGoogleSheet(
   const result = await updateRes.json();
 
   // ---------------------------------------------------------
-  // 6. CONFIRMACIÓN EN CONSOLA
+  // 10. CONFIRMACIÓN
   // ---------------------------------------------------------
 
   console.log(
@@ -1972,9 +2172,8 @@ async function appendSaleToNativeGoogleSheet(
         result?.updates?.updatedRange ||
         targetRange
     }
- };
- }
-
+  };
+}
 // API to save a sale and write/append to Google Drive (.xlsx)
 app.post(['/api/sales/save', '/api/sales/save-sheet'], async (req: Request, res: Response) => {
   const currentUser = checkUserPermission(req, res, ['ADMINISTRADOR', 'SECRETARIADO']);
