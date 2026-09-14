@@ -131,18 +131,30 @@ const handleSelectProduct = (productName: string) => {
         throw new Error(data.error || 'No se pudo registrar la venta en Google Drive.');
       }
 
-      const newSale: SaleRecord = data.sale;
-      setLastSavedResult(newSale);
-      setLastSaveStatus('success');
-      setIsConfirmationOpen(false);
-      onSaleSavedSuccessfully(newSale);
+     const newSale: SaleRecord = data.sale;
 
-      // Reset form for next sale
-      setCliente('');
-      setProductoServicio('');
-      setCantidad(1);
-      setPrecioUnitario('');
-      setObservaciones('');
+setLastSavedResult(newSale);
+setLastSaveStatus('success');
+setIsConfirmationOpen(false);
+
+// El guardado en Google Sheets ya fue confirmado.
+// Si el componente padre tiene algún problema,
+// no debe convertir una venta guardada en un "error de guardado".
+try {
+  onSaleSavedSuccessfully(newSale);
+} catch (callbackErr) {
+  console.error(
+    'La venta fue guardada correctamente, pero ocurrió un error al actualizar la interfaz:',
+    callbackErr
+  );
+}
+
+// Reset form for next sale
+setCliente('');
+setProductoServicio('');
+setCantidad(1);
+setPrecioUnitario('');
+setObservaciones('');
 
     } catch (err: any) {
       console.error('Error saving sale:', err);
