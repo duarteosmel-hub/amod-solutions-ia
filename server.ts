@@ -766,7 +766,7 @@ async function refreshGoogleAccessToken(tokenData: TokenStore, res?: Response): 
           maxAge: 86400000
         });
       }
-      '[Google OAuth] Token de acceso renovado exitosamente.');
+      console.log('[Google OAuth] Token de acceso renovado exitosamente.');
       return tokenData.access_token;
     } else {
       console.warn('[Google OAuth] Falló la renovación del token:', await tokenRes.text());
