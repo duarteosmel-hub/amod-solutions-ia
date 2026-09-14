@@ -1941,7 +1941,6 @@ if (nativeSheet) {
   driveFileId = nativeSheet.id;
 
   webViewLink =
-    nativeSheet.webViewLink ||
     `https://docs.google.com/spreadsheets/d/${driveFileId}/edit`;
 
   console.log(
@@ -1953,7 +1952,6 @@ if (nativeSheet) {
   );
 
 } else {
-
   // -------------------------------------------------------
   // 2. NO EXISTE GOOGLE SHEETS → BUSCAR XLSX ANTIGUO
   // -------------------------------------------------------
@@ -2013,9 +2011,8 @@ if (nativeSheet) {
     driveFileId = nativeSheet.id;
 
     webViewLink =
-      nativeSheet.webViewLink ||
-      `https://docs.google.com/spreadsheets/d/${driveFileId}/edit`;
-
+  `https://docs.google.com/spreadsheets/d/${driveFileId}/edit`;
+    
     console.log(
       '✅ XLSX CONVERTIDO A GOOGLE SHEETS:',
       {
@@ -2067,8 +2064,7 @@ if (nativeSheet) {
     driveFileId = nativeSheet.id;
 
     webViewLink =
-      nativeSheet.webViewLink ||
-      `https://docs.google.com/spreadsheets/d/${driveFileId}/edit`;
+  `https://docs.google.com/spreadsheets/d/${driveFileId}/edit`;
 
     // -----------------------------------------------------
     // CREAR ENCABEZADOS SOLAMENTE EN LA SHEET NUEVA
