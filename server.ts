@@ -766,7 +766,7 @@ async function refreshGoogleAccessToken(tokenData: TokenStore, res?: Response): 
           maxAge: 86400000
         });
       }
-      console.log('[Google OAuth] Token de acceso renovado exitosamente.');
+      '[Google OAuth] Token de acceso renovado exitosamente.');
       return tokenData.access_token;
     } else {
       console.warn('[Google OAuth] Falló la renovación del token:', await tokenRes.text());
@@ -1593,7 +1593,7 @@ async function createGoogleSheetFromXlsx(
     );
   }
 
-  console.log(
+  
     '✅ GOOGLE SHEET NATIVA CREADA:',
     {
       spreadsheetId,
@@ -1637,7 +1637,7 @@ async function appendSaleToGoogleSheet(
 
   const result = await appendRes.json();
 
-  console.log(
+  
     '✅ VENTA AGREGADA DIRECTAMENTE A GOOGLE SHEETS:',
     {
       spreadsheetId,
@@ -1653,7 +1653,219 @@ app.get('/api/sales/list', (req: Request, res: Response) => {
     sales: storedSalesRecords
   });
 });
+const GOOGLE_SHEET_MIME =
+  'application/vnd.google-apps.spreadsheet';
 
+const XLSX_MIME =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+async function findNativeSalesSheet(
+  fileName: string,
+  yearFolderId: string,
+  req: Request,
+  res: Response
+): Promise<any | null> {
+  const query =
+    `mimeType = '${GOOGLE_SHEET_MIME}' ` +
+    `and name = '${fileName}' ` +
+    `and '${yearFolderId}' in parents ` +
+    `and trashed = false`;
+
+  const response = await fetchDriveApi(
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}` +
+    `&fields=files(id,name,mimeType,webViewLink,parents,modifiedTime)`,
+    { method: 'GET' },
+    req,
+    res
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `No se pudo buscar la Google Sheet de ventas: ${errorText}`
+    );
+  }
+
+  const data = await response.json();
+
+  return data.files?.[0] || null;
+}
+async function convertXlsxToNativeGoogleSheet(
+  xlsxFileId: string,
+  xlsxFileName: string,
+  yearFolderId: string,
+  req: Request,
+  res: Response
+): Promise<any> {
+
+  const downloadRes = await fetchDriveApi(
+    `https://www.googleapis.com/drive/v3/files/${xlsxFileId}?alt=media`,
+    { method: 'GET' },
+    req,
+    res
+  );
+
+  if (!downloadRes.ok) {
+    const errorText = await downloadRes.text();
+
+    throw new Error(
+      `No se pudo leer el Excel existente para convertirlo: ${errorText}`
+    );
+  }
+
+  const xlsxBuffer = Buffer.from(
+    await downloadRes.arrayBuffer()
+  );
+
+  if (!xlsxBuffer.length) {
+    throw new Error(
+      'El Excel existente está vacío y no puede convertirse.'
+    );
+  }
+
+  const metadata = {
+    name: xlsxFileName,
+    parents: [yearFolderId],
+    mimeType: GOOGLE_SHEET_MIME,
+    description:
+      'Registro Oficial de Ventas convertido a Google Sheets. ' +
+      'Las nuevas ventas se agregan mediante Google Sheets API.'
+  };
+
+  const { body: multipartBody, boundary } =
+    createMultipartBuffer(
+      metadata,
+      xlsxBuffer,
+      XLSX_MIME
+    );
+
+  const createRes = await fetchDriveApi(
+    'https://www.googleapis.com/upload/drive/v3/files' +
+      '?uploadType=multipart&fields=id,name,mimeType,webViewLink,parents',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type':
+          `multipart/related; boundary="${boundary}"`
+      },
+      body: multipartBody
+    },
+    req,
+    res
+  );
+
+  if (!createRes.ok) {
+    const errorText = await createRes.text();
+
+    throw new Error(
+      `Google Drive no pudo convertir el Excel a Google Sheets: ${errorText}`
+    );
+  }
+
+  const convertedFile = await createRes.json();
+
+  if (!convertedFile.id) {
+    throw new Error(
+      'Google Drive no devolvió el ID de la Google Sheet convertida.'
+    );
+  }
+
+  
+    '✅ XLSX CONVERTIDO A GOOGLE SHEETS:',
+    {
+      originalFileId: xlsxFileId,
+      spreadsheetId: convertedFile.id,
+      name: convertedFile.name
+    }
+  );
+
+  return convertedFile;
+}
+async function appendSaleToNativeGoogleSheet(
+  spreadsheetId: string,
+  saleRow: any[],
+  req: Request,
+  res: Response
+): Promise<any> {
+
+  const spreadsheetRes = await fetchDriveApi(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}` +
+    `?fields=sheets.properties(sheetId,title)`,
+    { method: 'GET' },
+    req,
+    res
+  );
+
+  if (!spreadsheetRes.ok) {
+    const errorText = await spreadsheetRes.text();
+    throw new Error(
+      `No se pudo consultar Google Sheets: ${errorText}`
+    );
+  }
+
+  const spreadsheetData = await spreadsheetRes.json();
+
+  const firstSheet =
+    spreadsheetData.sheets?.[0]?.properties;
+
+  if (!firstSheet?.title) {
+    throw new Error(
+      'La Google Sheet no tiene una pestaña disponible.'
+    );
+  }
+
+  const sheetTitle = firstSheet.title;
+
+  const range =
+    `'${sheetTitle.replace(/'/g, "''")}'!A:J`;
+
+  const appendRes = await fetchDriveApi(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}` +
+    `/values/${encodeURIComponent(range)}:append` +
+    `?valueInputOption=USER_ENTERED` +
+    `&insertDataOption=INSERT_ROWS` +
+    `&includeValuesInResponse=true`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        majorDimension: 'ROWS',
+        values: [saleRow]
+      })
+    },
+    req,
+    res
+  );
+
+  if (!appendRes.ok) {
+    const errorText = await appendRes.text();
+    throw new Error(
+      `No se pudo agregar la venta a Google Sheets: ${errorText}`
+    );
+  }
+
+  const result = await appendRes.json();
+
+console.log(
+  '🟢 GOOGLE SHEETS CONFIRMÓ EL APPEND:',
+  JSON.stringify(result, null, 2)
+);
+
+console.log(
+  '✅ VENTA AGREGADA DIRECTAMENTE A GOOGLE SHEETS:',
+  {
+    spreadsheetId,
+    sheetTitle,
+    updatedRange:
+      result?.updates?.updatedRange || 'No informado'
+  }
+);
+
+return result;
+}
+  
 // API to save a sale and write/append to Google Drive (.xlsx)
 app.post(['/api/sales/save', '/api/sales/save-sheet'], async (req: Request, res: Response) => {
   const currentUser = checkUserPermission(req, res, ['ADMINISTRADOR', 'SECRETARIADO']);
@@ -1703,192 +1915,10 @@ app.post(['/api/sales/save', '/api/sales/save-sheet'], async (req: Request, res:
     const empFolderId = await findOrCreateDriveFolder('EMPRESA', null, req, res);
     const ventasFolderId = await findOrCreateDriveFolder('03_VENTAS', empFolderId, req, res);
     const yearFolderId = await findOrCreateDriveFolder(yearStr, ventasFolderId, req, res);
-
-    // 2. Search if Ventas_YYYY-MM.xlsx exists in yearFolderId
-    const searchFileQuery = `mimeType != 'application/vnd.google-apps.folder' and name = '${xlsxFileName}' and '${yearFolderId}' in parents and trashed = false`;
-    const fileSearchRes = await fetchDriveApi(
-  `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(searchFileQuery)}&fields=files(id,name,mimeType,webViewLink,size,modifiedTime)`,
-  { method: 'GET' },
-  req,
-  res
-);
+  
     let driveFileId = '';
     let webViewLink = '';
-    let existingRows: any[] = [];
-
-    const newRowObject = {
-      'ID Venta': saleId,
-      'Fecha': fecha,
-      'Cliente': cliente,
-      'Producto/Servicio': productoServicio,
-      'Cantidad': numQty,
-      'Precio Unitario': numPrice,
-      'Total': total,
-      'Forma de Pago': formaPago || 'Efectivo',
-      'Estado': estadoPago || 'Pagado',
-      'Observaciones': observaciones || ''
-    };
-
-       let excelBuffer: Buffer;
-
-    if (fileSearchRes.ok) {
-      const fileSearchData = await fileSearchRes.json();
-     
-      console.log(
-  'ARCHIVO EXCEL ENCONTRADO EN DRIVE:',
-  JSON.stringify(fileSearchData.files?.[0] || null, null, 2)
-);
-
-      if (fileSearchData.files && fileSearchData.files.length > 0) {
-        // =========================================================
-        // EXISTE EL EXCEL: DESCARGAR Y AGREGAR LA NUEVA VENTA
-        // =========================================================
-        driveFileId = fileSearchData.files[0].id;
-        webViewLink =
-          fileSearchData.files[0].webViewLink ||
-          `https://drive.google.com/file/d/${driveFileId}/view`;
-
-        // Descargar el Excel existente desde Google Drive
-        const downloadRes = await fetchDriveApi(
-          `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`,
-          { method: 'GET' },
-          req,
-          res
-        );
-
-        if (!downloadRes.ok) {
-          const errTxt = await downloadRes.text();
-
-          throw new Error(
-            `No se pudo leer el Excel existente de Google Drive. ` +
-            `La venta NO fue modificada para proteger los registros anteriores. ` +
-            `Respuesta de Google Drive: ${errTxt}`
-          );
-        }
-
-        const fileBuf = await downloadRes.arrayBuffer();
-
-        if (!fileBuf || fileBuf.byteLength === 0) {
-          throw new Error(
-            'Google Drive devolvió un archivo Excel vacío. ' +
-            'La venta NO fue guardada para proteger los registros anteriores.'
-          );
-        }
-
-        const workbook = XLSX.read(Buffer.from(fileBuf), {
-          type: 'buffer'
-        });
-
-        const sheetName = workbook.SheetNames[0] || 'Ventas';
-        const worksheet = workbook.Sheets[sheetName];
-
-        if (!worksheet) {
-          throw new Error(
-            'No se encontró la hoja de ventas dentro del Excel existente. ' +
-            'La venta NO fue guardada para proteger los registros anteriores.'
-          );
-        }
-
-        // Agregar la nueva venta a la hoja existente.
-        // NO crear un workbook nuevo.
-        XLSX.utils.sheet_add_json(worksheet, [newRowObject], {
-          header: [
-            'ID Venta',
-            'Fecha',
-            'Cliente',
-            'Producto/Servicio',
-            'Cantidad',
-            'Precio Unitario',
-            'Total',
-            'Forma de Pago',
-            'Estado',
-            'Observaciones'
-          ],
-          skipHeader: true,
-          origin: -1
-        });
-
-             // Mantener el workbook existente.
-        excelBuffer = XLSX.write(workbook, {
-          type: 'buffer',
-          bookType: 'xlsx'
-        });
-        
-        try {
-  const verifyWorkbook = XLSX.read(excelBuffer, {
-    type: 'buffer'
-  });
-
-  const verifySheetName = verifyWorkbook.SheetNames[0];
-  const verifyWorksheet = verifyWorkbook.Sheets[verifySheetName];
-
-  const verifyRows = XLSX.utils.sheet_to_json(verifyWorksheet);
-
-  const saleExistsInBuffer = verifyRows.some(
-    (row: any) => row['ID Venta'] === saleId
-  );
-
-  console.log(
-    'VERIFICACIÓN XLSX ANTES DE SUBIR:',
-    {
-      saleId,
-      saleExistsInBuffer,
-      totalRows: verifyRows.length,
-      excelBytes: excelBuffer.length
-    }
-  );
-} catch (verifyErr) {
-  console.error(
-    'ERROR VERIFICANDO XLSX ANTES DE SUBIR:',
-    verifyErr
-  );
-}
-
-} else {
-        // =========================================================
-        // NO EXISTE EL EXCEL: CREAR UNO NUEVO
-        // =========================================================
-        const workbook = XLSX.utils.book_new();
-
-        const worksheet = XLSX.utils.json_to_sheet([
-          newRowObject
-        ]);
-
-        XLSX.utils.book_append_sheet(
-          workbook,
-          worksheet,
-          'Ventas'
-        );
-
-        excelBuffer = XLSX.write(workbook, {
-          type: 'buffer',
-          bookType: 'xlsx'
-        });
-      }
-
-    } else {
-      // =========================================================
-      // NO SE PUDO HACER LA BÚSQUEDA EN GOOGLE DRIVE
-      // CREAR UN EXCEL NUEVO
-      // =========================================================
-      const workbook = XLSX.utils.book_new();
-
-      const worksheet = XLSX.utils.json_to_sheet([
-        newRowObject
-      ]);
-
-      XLSX.utils.book_append_sheet(
-        workbook,
-        worksheet,
-        'Ventas'
-      );
-
-      excelBuffer = XLSX.write(workbook, {
-        type: 'buffer',
-        bookType: 'xlsx'
-      });
-    }
-
+    
   // =========================================================
 // GUARDAR VENTA DIRECTAMENTE EN GOOGLE SHEETS
 // =========================================================
@@ -1915,7 +1945,7 @@ if (nativeSheet) {
     nativeSheet.webViewLink ||
     `https://docs.google.com/spreadsheets/d/${driveFileId}/edit`;
 
-  console.log(
+  
     '✅ GOOGLE SHEETS NATIVO ENCONTRADO:',
     {
       spreadsheetId: driveFileId,
@@ -2032,33 +2062,7 @@ if (nativeSheet) {
       nativeSheet.webViewLink ||
       `https://docs.google.com/spreadsheets/d/${driveFileId}/edit`;
 
-    // Crear encabezados
-    const headersRes = await fetchDriveApi(
-      `https://sheets.googleapis.com/v4/spreadsheets/${driveFileId}/values/Ventas!A1:J1?valueInputOption=USER_ENTERED`,
-      {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          majorDimension: 'ROWS',
-          values: [[
-            'ID Venta',
-            'Fecha',
-            'Cliente',
-            'Producto/Servicio',
-            'Cantidad',
-            'Precio Unitario',
-            'Total',
-            'Forma de Pago',
-            'Estado',
-            'Observaciones'
-          ]]
-        })
-      },
-      req,
-      res
-    );
+  
 
     if (!headersRes.ok) {
       const errorText = await headersRes.text();
@@ -2068,7 +2072,7 @@ if (nativeSheet) {
       );
     }
 
-    console.log(
+    
       '✅ GOOGLE SHEETS NUEVO CREADO:',
       {
         spreadsheetId: driveFileId,
@@ -2102,7 +2106,7 @@ await appendSaleToNativeGoogleSheet(
   res
 );
 
-console.log(
+
   '✅ VENTA GUARDADA EN GOOGLE SHEETS:',
   {
     saleId,
@@ -2678,7 +2682,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[AMOD Solución IA] Servidor ejecutándose en http://0.0.0.0:${PORT}`);
+    `[AMOD Solución IA] Servidor ejecutándose en http://0.0.0.0:${PORT}`);
   });
 }
 
