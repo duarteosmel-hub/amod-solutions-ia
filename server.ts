@@ -1769,7 +1769,7 @@ async function convertXlsxToNativeGoogleSheet(
     );
   }
 
-  
+    console.log(
     '✅ XLSX CONVERTIDO A GOOGLE SHEETS:',
     {
       originalFileId: xlsxFileId,
@@ -1845,24 +1845,24 @@ async function appendSaleToNativeGoogleSheet(
     );
   }
 
-  const result = await appendRes.json();
+   const result = await appendRes.json();
 
-console.log(
-  '🟢 GOOGLE SHEETS CONFIRMÓ EL APPEND:',
-  JSON.stringify(result, null, 2)
-);
+  console.log(
+    '🟢 GOOGLE SHEETS CONFIRMÓ EL APPEND:',
+    JSON.stringify(result, null, 2)
+  );
 
-console.log(
-  '✅ VENTA AGREGADA DIRECTAMENTE A GOOGLE SHEETS:',
-  {
-    spreadsheetId,
-    sheetTitle,
-    updatedRange:
-      result?.updates?.updatedRange || 'No informado'
-  }
-);
+  console.log(
+    '✅ VENTA AGREGADA DIRECTAMENTE A GOOGLE SHEETS:',
+    {
+      spreadsheetId,
+      sheetTitle,
+      updatedRange:
+        result?.updates?.updatedRange || 'No informado'
+    }
+  );
 
-return result;
+  return result;
 }
   
 // API to save a sale and write/append to Google Drive (.xlsx)
@@ -1933,7 +1933,7 @@ let nativeSheet =
   );
 
 // ---------------------------------------------------------
-// SI YA EXISTE GOOGLE SHEETS NATIVO
+// 1. YA EXISTE GOOGLE SHEETS NATIVO
 // ---------------------------------------------------------
 
 if (nativeSheet) {
@@ -1944,8 +1944,8 @@ if (nativeSheet) {
     nativeSheet.webViewLink ||
     `https://docs.google.com/spreadsheets/d/${driveFileId}/edit`;
 
-  
-    '✅ GOOGLE SHEETS NATIVO ENCONTRADO:',
+  console.log(
+    '✅ GOOGLE SHEETS EXISTENTE ENCONTRADO:',
     {
       spreadsheetId: driveFileId,
       name: nativeSheet.name
@@ -1955,7 +1955,7 @@ if (nativeSheet) {
 } else {
 
   // -------------------------------------------------------
-  // BUSCAR EL XLSX ANTIGUO
+  // 2. NO EXISTE GOOGLE SHEETS → BUSCAR XLSX ANTIGUO
   // -------------------------------------------------------
 
   const oldXlsxQuery =
@@ -1988,7 +1988,7 @@ if (nativeSheet) {
     oldXlsxData.files?.[0] || null;
 
   // -------------------------------------------------------
-  // EXISTE XLSX → CONVERTIR UNA SOLA VEZ
+  // 3. EXISTE XLSX → CONVERTIR UNA SOLA VEZ
   // -------------------------------------------------------
 
   if (oldXlsx) {
@@ -2016,10 +2016,19 @@ if (nativeSheet) {
       nativeSheet.webViewLink ||
       `https://docs.google.com/spreadsheets/d/${driveFileId}/edit`;
 
+    console.log(
+      '✅ XLSX CONVERTIDO A GOOGLE SHEETS:',
+      {
+        originalFileId: oldXlsx.id,
+        spreadsheetId: driveFileId,
+        name: nativeSheet.name
+      }
+    );
+
   } else {
 
     // -----------------------------------------------------
-    // NO EXISTE NINGÚN ARCHIVO → CREAR GOOGLE SHEETS NUEVO
+    // 4. NO EXISTE NINGÚN ARCHIVO → CREAR GOOGLE SHEETS
     // -----------------------------------------------------
 
     const createMetadata = {
@@ -2061,7 +2070,36 @@ if (nativeSheet) {
       nativeSheet.webViewLink ||
       `https://docs.google.com/spreadsheets/d/${driveFileId}/edit`;
 
-  
+    // -----------------------------------------------------
+    // CREAR ENCABEZADOS SOLAMENTE EN LA SHEET NUEVA
+    // -----------------------------------------------------
+
+    const headersRes = await fetchDriveApi(
+      `https://sheets.googleapis.com/v4/spreadsheets/${driveFileId}/values/Sheet1!A1:J1?valueInputOption=USER_ENTERED`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          majorDimension: 'ROWS',
+          values: [[
+            'ID Venta',
+            'Fecha',
+            'Cliente',
+            'Producto/Servicio',
+            'Cantidad',
+            'Precio Unitario',
+            'Total',
+            'Forma de Pago',
+            'Estado',
+            'Observaciones'
+          ]]
+        })
+      },
+      req,
+      res
+    );
 
     if (!headersRes.ok) {
       const errorText = await headersRes.text();
@@ -2071,7 +2109,7 @@ if (nativeSheet) {
       );
     }
 
-    
+    console.log(
       '✅ GOOGLE SHEETS NUEVO CREADO:',
       {
         spreadsheetId: driveFileId,
@@ -2098,20 +2136,23 @@ const saleRow = [
   observaciones || ''
 ];
 
-await appendSaleToNativeGoogleSheet(
-  driveFileId,
-  saleRow,
-  req,
-  res
-);
+const appendResult =
+  await appendSaleToNativeGoogleSheet(
+    driveFileId,
+    saleRow,
+    req,
+    res
+  );
 
-
+console.log(
   '✅ VENTA GUARDADA EN GOOGLE SHEETS:',
   {
     saleId,
     spreadsheetId: driveFileId,
     cliente,
-    total
+    total,
+    updatedRange:
+      appendResult?.updates?.updatedRange || 'No informado'
   }
 );
 
@@ -2123,13 +2164,14 @@ webViewLink =
   webViewLink ||
   `https://docs.google.com/spreadsheets/d/${driveFileId}/edit`;
 
-    const driveResult = {
-      fileId: driveFileId,
-      fileName: xlsxFileName,
-      webViewLink,
-      parentFolderPath: targetFolderPath,
-      savedAt: new Date().toISOString()
-    };
+const driveResult = {
+  fileId: driveFileId,
+  fileName: xlsxFileName,
+  webViewLink,
+  parentFolderPath: targetFolderPath,
+  parentFolderId: yearFolderId,
+  savedAt: new Date().toISOString()
+};
 
     // 3. GENERATE AUTOMATIC SALES RECEIPT PDF (COMPROBANTE DE VENTA)
     // Target location: EMPRESA/03_VENTAS/Comprobantes/Comprobante_[ID_DE_VENTA].pdf
