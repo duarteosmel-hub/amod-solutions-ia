@@ -1812,7 +1812,7 @@ async function appendSaleToNativeGoogleSheet(
       'La Google Sheet no tiene una pestaña disponible.'
     );
   }
-
+  
   const sheetTitle = firstSheet.title;
 
   const range =
