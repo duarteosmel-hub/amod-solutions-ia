@@ -1725,7 +1725,99 @@ async function findNativeSalesSheet(
 
   return nativeSheet;
 }
-  
+// =========================================================
+// AGREGAR VENTA DIRECTAMENTE A GOOGLE SHEETS
+// =========================================================
+
+async function appendSaleToNativeGoogleSheet(
+  spreadsheetId: string,
+  saleRow: any[],
+  req: Request,
+  res: Response
+): Promise<any> {
+
+  const spreadsheetRes = await fetchDriveApi(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title)`,
+    {
+      method: 'GET'
+    },
+    req,
+    res
+  );
+
+  if (!spreadsheetRes.ok) {
+    const errorText = await spreadsheetRes.text();
+
+    throw new Error(
+      `No se pudo consultar la Google Sheet de ventas: ${errorText}`
+    );
+  }
+
+  const spreadsheetData = await spreadsheetRes.json();
+
+  const firstSheet =
+    spreadsheetData.sheets?.[0]?.properties;
+
+  if (!firstSheet?.title) {
+    throw new Error(
+      'La Google Sheet no tiene una pestaña disponible.'
+    );
+  }
+
+  const sheetTitle = firstSheet.title;
+
+  const range =
+    `'${sheetTitle.replace(/'/g, "''")}'!A:J`;
+
+  const appendRes = await fetchDriveApi(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}` +
+      `/values/${encodeURIComponent(range)}:append` +
+      `?valueInputOption=USER_ENTERED` +
+      `&insertDataOption=INSERT_ROWS` +
+      `&includeValuesInResponse=true`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        majorDimension: 'ROWS',
+        values: [saleRow]
+      })
+    },
+    req,
+    res
+  );
+
+  if (!appendRes.ok) {
+    const errorText = await appendRes.text();
+
+    throw new Error(
+      `No se pudo agregar la venta a Google Sheets: ${errorText}`
+    );
+  }
+
+  const result = await appendRes.json();
+
+  console.log(
+    '🟢 GOOGLE SHEETS CONFIRMÓ EL APPEND:',
+    JSON.stringify(result, null, 2)
+  );
+
+  console.log(
+    '✅ VENTA AGREGADA DIRECTAMENTE A GOOGLE SHEETS:',
+    {
+      spreadsheetId,
+      sheetTitle,
+      updatedRange:
+        result?.updates?.updatedRange ||
+        'No informado'
+    }
+  );
+
+  return result;
+}
+
 // API to save a sale and write/append to Google Drive (.xlsx)
 app.post(['/api/sales/save', '/api/sales/save-sheet'], async (req: Request, res: Response) => {
   const currentUser = checkUserPermission(req, res, ['ADMINISTRADOR', 'SECRETARIADO']);
