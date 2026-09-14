@@ -1664,22 +1664,31 @@ async function findNativeSalesSheet(
   req: Request,
   res: Response
 ): Promise<any | null> {
+
+  // Google Drive puede quitar ".xlsx" al convertir
+  // un archivo Excel en una Google Sheet nativa.
+  const baseName = fileName.replace(/\.xlsx$/i, '');
+
   const query =
     `mimeType = '${GOOGLE_SHEET_MIME}' ` +
-    `and name = '${fileName}' ` +
     `and '${yearFolderId}' in parents ` +
-    `and trashed = false`;
+    `and trashed = false ` +
+    `and (name = '${fileName}' or name = '${baseName}')`;
 
   const response = await fetchDriveApi(
     `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}` +
-    `&fields=files(id,name,mimeType,webViewLink,parents,modifiedTime)`,
-    { method: 'GET' },
+      `&orderBy=modifiedTime desc` +
+      `&fields=files(id,name,mimeType,webViewLink,parents,modifiedTime)`,
+    {
+      method: 'GET'
+    },
     req,
     res
   );
 
   if (!response.ok) {
     const errorText = await response.text();
+
     throw new Error(
       `No se pudo buscar la Google Sheet de ventas: ${errorText}`
     );
@@ -1687,182 +1696,34 @@ async function findNativeSalesSheet(
 
   const data = await response.json();
 
-  return data.files?.[0] || null;
-}
-async function convertXlsxToNativeGoogleSheet(
-  xlsxFileId: string,
-  xlsxFileName: string,
-  yearFolderId: string,
-  req: Request,
-  res: Response
-): Promise<any> {
+  const files = data.files || [];
 
-  const downloadRes = await fetchDriveApi(
-    `https://www.googleapis.com/drive/v3/files/${xlsxFileId}?alt=media`,
-    { method: 'GET' },
-    req,
-    res
-  );
-
-  if (!downloadRes.ok) {
-    const errorText = await downloadRes.text();
-
-    throw new Error(
-      `No se pudo leer el Excel existente para convertirlo: ${errorText}`
-    );
-  }
-
-  const xlsxBuffer = Buffer.from(
-    await downloadRes.arrayBuffer()
-  );
-
-  if (!xlsxBuffer.length) {
-    throw new Error(
-      'El Excel existente está vacío y no puede convertirse.'
-    );
-  }
-
-  const metadata = {
-    name: xlsxFileName,
-    parents: [yearFolderId],
-    mimeType: GOOGLE_SHEET_MIME,
-    description:
-      'Registro Oficial de Ventas convertido a Google Sheets. ' +
-      'Las nuevas ventas se agregan mediante Google Sheets API.'
-  };
-
-  const { body: multipartBody, boundary } =
-    createMultipartBuffer(
-      metadata,
-      xlsxBuffer,
-      XLSX_MIME
-    );
-
-  const createRes = await fetchDriveApi(
-    'https://www.googleapis.com/upload/drive/v3/files' +
-      '?uploadType=multipart&fields=id,name,mimeType,webViewLink,parents',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type':
-          `multipart/related; boundary="${boundary}"`
-      },
-      body: multipartBody
-    },
-    req,
-    res
-  );
-
-  if (!createRes.ok) {
-    const errorText = await createRes.text();
-
-    throw new Error(
-      `Google Drive no pudo convertir el Excel a Google Sheets: ${errorText}`
-    );
-  }
-
-  const convertedFile = await createRes.json();
-
-  if (!convertedFile.id) {
-    throw new Error(
-      'Google Drive no devolvió el ID de la Google Sheet convertida.'
-    );
-  }
+  if (!files.length) {
 
     console.log(
-    '✅ XLSX CONVERTIDO A GOOGLE SHEETS:',
+      'ℹ️ NO SE ENCONTRÓ GOOGLE SHEETS NATIVA PARA:',
+      {
+        fileName,
+        baseName,
+        yearFolderId
+      }
+    );
+
+    return null;
+  }
+
+  const nativeSheet = files[0];
+
+  console.log(
+    '✅ GOOGLE SHEETS NATIVA ENCONTRADA:',
     {
-      originalFileId: xlsxFileId,
-      spreadsheetId: convertedFile.id,
-      name: convertedFile.name
+      spreadsheetId: nativeSheet.id,
+      name: nativeSheet.name,
+      modifiedTime: nativeSheet.modifiedTime
     }
   );
 
-  return convertedFile;
-}
-async function appendSaleToNativeGoogleSheet(
-  spreadsheetId: string,
-  saleRow: any[],
-  req: Request,
-  res: Response
-): Promise<any> {
-
-  const spreadsheetRes = await fetchDriveApi(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}` +
-    `?fields=sheets.properties(sheetId,title)`,
-    { method: 'GET' },
-    req,
-    res
-  );
-
-  if (!spreadsheetRes.ok) {
-    const errorText = await spreadsheetRes.text();
-    throw new Error(
-      `No se pudo consultar Google Sheets: ${errorText}`
-    );
-  }
-
-  const spreadsheetData = await spreadsheetRes.json();
-
-  const firstSheet =
-    spreadsheetData.sheets?.[0]?.properties;
-
-  if (!firstSheet?.title) {
-    throw new Error(
-      'La Google Sheet no tiene una pestaña disponible.'
-    );
-  }
-  
-  const sheetTitle = firstSheet.title;
-
-  const range =
-    `'${sheetTitle.replace(/'/g, "''")}'!A:J`;
-
-  const appendRes = await fetchDriveApi(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}` +
-    `/values/${encodeURIComponent(range)}:append` +
-    `?valueInputOption=USER_ENTERED` +
-    `&insertDataOption=INSERT_ROWS` +
-    `&includeValuesInResponse=true`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        majorDimension: 'ROWS',
-        values: [saleRow]
-      })
-    },
-    req,
-    res
-  );
-
-  if (!appendRes.ok) {
-    const errorText = await appendRes.text();
-    throw new Error(
-      `No se pudo agregar la venta a Google Sheets: ${errorText}`
-    );
-  }
-
-   const result = await appendRes.json();
-
-  console.log(
-    '🟢 GOOGLE SHEETS CONFIRMÓ EL APPEND:',
-    JSON.stringify(result, null, 2)
-  );
-
-  console.log(
-    '✅ VENTA AGREGADA DIRECTAMENTE A GOOGLE SHEETS:',
-    {
-      spreadsheetId,
-      sheetTitle,
-      updatedRange:
-        result?.updates?.updatedRange || 'No informado'
-    }
-  );
-
-  return result;
+  return nativeSheet;
 }
   
 // API to save a sale and write/append to Google Drive (.xlsx)
