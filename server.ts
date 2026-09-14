@@ -1736,6 +1736,10 @@ async function appendSaleToNativeGoogleSheet(
   res: Response
 ): Promise<any> {
 
+  // ---------------------------------------------------------
+  // 1. CONSULTAR LA ESTRUCTURA DE LA GOOGLE SHEET
+  // ---------------------------------------------------------
+
   const spreadsheetRes = await fetchDriveApi(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title)`,
     {
@@ -1766,21 +1770,121 @@ async function appendSaleToNativeGoogleSheet(
 
   const sheetTitle = firstSheet.title;
 
-  const range =
-    `'${sheetTitle.replace(/'/g, "''")}'!A:J`;
+  const escapedSheetTitle =
+    sheetTitle.replace(/'/g, "''");
 
-  const appendRes = await fetchDriveApi(
+  // ---------------------------------------------------------
+  // 2. LEER LAS FILAS EXISTENTES DE A:J
+  // ---------------------------------------------------------
+  // No modificamos nada aquí.
+  // Solo consultamos para saber dónde está la última venta real.
+
+  const readRange =
+    `'${escapedSheetTitle}'!A:J`;
+
+  const readRes = await fetchDriveApi(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}` +
-      `/values/${encodeURIComponent(range)}:append` +
+      `/values/${encodeURIComponent(readRange)}` +
+      `?majorDimension=ROWS`,
+    {
+      method: 'GET'
+    },
+    req,
+    res
+  );
+
+  if (!readRes.ok) {
+    const errorText = await readRes.text();
+
+    throw new Error(
+      `No se pudieron leer las ventas existentes en Google Sheets: ${errorText}`
+    );
+  }
+
+  const readResult = await readRes.json();
+
+  const existingRows: any[][] =
+    Array.isArray(readResult.values)
+      ? readResult.values
+      : [];
+
+  // ---------------------------------------------------------
+  // 3. BUSCAR LA ÚLTIMA FILA REAL DE VENTAS
+  // ---------------------------------------------------------
+  // La fila 1 contiene los encabezados.
+  // Buscamos únicamente filas que tengan un ID de venta
+  // real en la columna A.
+  //
+  // Así evitamos que Google Sheets nos mande hasta la fila 1011
+  // solamente porque existen filas/formato/fórmulas más abajo.
+
+  let lastSaleRowIndex = 0;
+
+  for (let i = 1; i < existingRows.length; i++) {
+    const row = existingRows[i];
+
+    const saleIdValue =
+      row?.[0] !== undefined && row?.[0] !== null
+        ? String(row[0]).trim()
+        : '';
+
+    if (saleIdValue !== '') {
+      lastSaleRowIndex = i + 1;
+    }
+  }
+
+  // ---------------------------------------------------------
+  // 4. DETERMINAR LA FILA EXACTA DONDE SE ESCRIBIRÁ
+  // ---------------------------------------------------------
+  //
+  // Si solo existen encabezados:
+  //   nueva venta = fila 2
+  //
+  // Si existen ventas hasta la fila 3:
+  //   nueva venta = fila 4
+  //
+  // IMPORTANTE:
+  // No usamos la fila 1011 automáticamente.
+
+  const targetRow =
+    Math.max(2, lastSaleRowIndex + 1);
+
+  const targetRange =
+    `'${escapedSheetTitle}'!A${targetRow}:J${targetRow}`;
+
+  console.log(
+    '📍 FILA REAL DETECTADA PARA LA NUEVA VENTA:',
+    {
+      spreadsheetId,
+      sheetTitle,
+      lastSaleRowIndex,
+      targetRow,
+      targetRange
+    }
+  );
+
+  // ---------------------------------------------------------
+  // 5. ESCRIBIR LA NUEVA VENTA EN LA FILA CORRECTA
+  // ---------------------------------------------------------
+  //
+  // Usamos values.update en lugar de values.append.
+  //
+  // Esto escribe SOLO A:J de la fila indicada.
+  // No elimina ni modifica otras filas.
+  // No limpia fórmulas fuera de A:J.
+
+  const updateRes = await fetchDriveApi(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}` +
+      `/values/${encodeURIComponent(targetRange)}` +
       `?valueInputOption=USER_ENTERED` +
-      `&insertDataOption=INSERT_ROWS` +
       `&includeValuesInResponse=true`,
     {
-      method: 'POST',
+      method: 'PUT',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
+        range: targetRange,
         majorDimension: 'ROWS',
         values: [saleRow]
       })
@@ -1789,18 +1893,22 @@ async function appendSaleToNativeGoogleSheet(
     res
   );
 
-  if (!appendRes.ok) {
-    const errorText = await appendRes.text();
+  if (!updateRes.ok) {
+    const errorText = await updateRes.text();
 
     throw new Error(
-      `No se pudo agregar la venta a Google Sheets: ${errorText}`
+      `No se pudo escribir la venta en Google Sheets: ${errorText}`
     );
   }
 
-  const result = await appendRes.json();
+  const result = await updateRes.json();
+
+  // ---------------------------------------------------------
+  // 6. CONFIRMACIÓN EN CONSOLA
+  // ---------------------------------------------------------
 
   console.log(
-    '🟢 GOOGLE SHEETS CONFIRMÓ EL APPEND:',
+    '🟢 GOOGLE SHEETS CONFIRMÓ LA ESCRITURA:',
     JSON.stringify(result, null, 2)
   );
 
@@ -1809,13 +1917,24 @@ async function appendSaleToNativeGoogleSheet(
     {
       spreadsheetId,
       sheetTitle,
+      targetRow,
       updatedRange:
+        result?.updatedRange ||
         result?.updates?.updatedRange ||
-        'No informado'
+        targetRange
     }
   );
 
-  return result;
+  return {
+    ...result,
+    updates: {
+      ...(result?.updates || {}),
+      updatedRange:
+        result?.updatedRange ||
+        result?.updates?.updatedRange ||
+        targetRange
+    }
+  };
 }
 
 // API to save a sale and write/append to Google Drive (.xlsx)
